@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Чат</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="navbar__logo">💬 Chat</div>
+    <ul class="navbar__links">
+      <li><a href="#" class="active">Главная</a></li>
+      <li><a href="#">Контакты</a></li>
+      <li><a href="#">Настройки</a></li>
+    </ul>
+  </nav>
+
+  <main class="main">
+    <section class="chat">
+      <div class="chat__window" id="chatWindow">
+        <div class="message message--in">
+          Привет! Напиши что-нибудь 👋
+          <span class="message__time">--:--</span>
+        </div>
+      </div>
+
+      <form class="chat__form" id="chatForm">
+        <textarea
+          class="chat__input"
+          id="messageInput"
+          name="message"
+          rows="1"
+          placeholder="Введите сообщение..."
+          required></textarea>
+        <button type="submit" class="chat__button" id="sendButton">Отправить</button>
+      </form>
+    </section>
+  </main>
+
+  <script src = "script.js"></script>
+</body>
+</html>
+
