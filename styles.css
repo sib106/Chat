@@ -227,3 +227,32 @@ body {
   .chat { max-width: 760px; width: 100%; }
   .monitor { flex: 0 0 260px; width: 100%; max-width: 760px; }
 }
+/* Выбор модели в шапке */
+.navbar__model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 24px;
+  font-size: 13px;
+  color: #dbe6f0;
+}
+.navbar__select {
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #fff;
+  background: #1f3e5c;
+  border: 1px solid #4a6d94;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.navbar__select:focus {
+  outline: none;
+  border-color: #86b4e0;
+}
+
+@media (max-width: 700px) {
+  .navbar__model label { display: none; }
+  .navbar__model { margin-right: 12px; }
+}

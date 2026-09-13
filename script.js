@@ -10,7 +10,8 @@ function buildTrace(trace) {
 
     const summary = document.createElement('summary');
     const seconds = ((trace.totalMs || 0) / 1000).toFixed(1);
-    summary.textContent = `Показать процесс: шагов ${trace.steps.length}, ${seconds} с`;
+    const model = trace.model ? `${trace.model}, ` : '';
+    summary.textContent = `Показать процесс: ${model}шагов ${trace.steps.length}, ${seconds} с`;
     details.appendChild(summary);
 
     trace.steps.forEach((s) => {
@@ -78,7 +79,7 @@ form.addEventListener('submit', async (event) => {
         const res = await fetch('/api/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text }),
+            body: JSON.stringify({ text, model: currentModel }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
@@ -128,7 +129,7 @@ function monitorLine(text, kind) {
 // Событие сервера -> строка на экране
 function describeEvent(e) {
     switch (e.type) {
-        case 'start':      return [`Вопрос: ${e.question}`, 'start'];
+        case 'start':      return [`Вопрос к ${e.model || 'модели'}: ${e.question}`, 'start'];
         case 'thinking':   return [`Шаг ${e.step}: модель думает…`, 'wait'];
         case 'llm':        return [`Шаг ${e.step}: ответ модели за ${e.ms} мс — ` + (e.toolCalls.length ? `нужны инструменты: ${e.toolCalls.join(', ')}` : 'готов финальный ответ'), 'llm'];
         case 'tool-start': return [`Шаг ${e.step}: запускаю ${e.name}(${short(e.args, 80)})`, 'tool'];
@@ -162,3 +163,51 @@ events.onmessage = (m) => {
 monitorClear.addEventListener('click', () => {
     monitorLog.textContent = '';
 });
+// ---------- Выбор модели ----------
+const modelSelect = document.getElementById('modelSelect');
+const MODEL_KEY = 'polygon.model';
+
+function readSavedModel() {
+    try {
+        return localStorage.getItem(MODEL_KEY);
+    } catch {
+        return null; // приватный режим или запрет на хранение
+    }
+}
+
+let currentModel = readSavedModel();
+
+async function loadModels() {
+    try {
+        const res = await fetch('/api/models');
+        const data = await res.json();
+
+        modelSelect.innerHTML = '';
+        data.models.forEach((m) => {
+            const option = document.createElement('option');
+            option.value = m.id;
+            option.textContent = m.installed ? m.title : `${m.title} — не скачана`;
+            option.title = m.note || '';
+            modelSelect.appendChild(option);
+        });
+
+        // Сохранённый выбор мог устареть — тогда берём модель по умолчанию
+        const known = data.models.some((m) => m.id === currentModel);
+        currentModel = known ? currentModel : data.defaultModel;
+        modelSelect.value = currentModel;
+    } catch (err) {
+        console.error('Не удалось получить список моделей', err);
+    }
+}
+
+modelSelect.addEventListener('change', () => {
+    currentModel = modelSelect.value;
+    try {
+        localStorage.setItem(MODEL_KEY, currentModel);
+    } catch {
+        // не смогли запомнить — не страшно
+    }
+    monitorLine(`Выбрана модель ${currentModel}`, 'start');
+});
+
+loadModels();

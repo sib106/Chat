@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { runAgent } = require('./agent');
+const { runAgent, MODELS, DEFAULT_MODEL, findModel } = require('./agent');
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'messages.json');
@@ -30,9 +30,8 @@ function writeMessages(messages) {
   fs.writeFileSync(DB_FILE, JSON.stringify(messages, null, 2));
 }
 
-function saveMessage(role, text, trace) {
-  const message = { id: Date.now(), role, text, createdAt: new Date().toISOString() };
-  if (trace) message.trace = trace;
+function saveMessage(role, text, extra = {}) {
+  const message = { id: Date.now(), role, text, createdAt: new Date().toISOString(), ...extra };
 
   const messages = readMessages();
   messages.push(message);
@@ -46,6 +45,28 @@ const listeners = new Set();
 function broadcast(event) {
   const line = `data: ${JSON.stringify(event)}\n\n`;
   for (const client of listeners) client.write(line);
+}
+
+// Список моделей для интерфейса: профили агента плюс отметка, скачана ли модель
+const OLLAMA_TAGS_URL = (process.env.OLLAMA_URL || 'http://localhost:11434/api/chat').replace('/api/chat', '/api/tags');
+
+async function listModels() {
+  let installed = new Set();
+
+  try {
+    const res = await fetch(OLLAMA_TAGS_URL, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const data = await res.json();
+      installed = new Set((data.models || []).map((m) => m.name));
+    }
+  } catch {
+    // Ollama не отвечает — покажем список без отметок
+  }
+
+  return {
+    defaultModel: DEFAULT_MODEL,
+    models: MODELS.map((m) => ({ id: m.id, title: m.title, note: m.note, installed: installed.has(m.id) })),
+  };
 }
 
 function sendJson(res, status, data) {
@@ -73,6 +94,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/api/models') {
+    listModels().then((data) => sendJson(res, 200, data));
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/api/messages') {
     sendJson(res, 200, readMessages());
     return;
@@ -88,13 +114,17 @@ const server = http.createServer((req, res) => {
     });
     req.on('end', async () => {
       let text;
+      let model;
       try {
-        const body = Buffer.concat(chunks).toString('utf8');
-        text = String(JSON.parse(body).text || '').trim();
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        text = String(body.text || '').trim();
+        model = body.model ? String(body.model) : DEFAULT_MODEL;
       } catch {
         return sendJson(res, 400, { error: 'Некорректный JSON' });
       }
       if (!text) return sendJson(res, 400, { error: 'Пустое сообщение' });
+      // Модель приходит из браузера, поэтому принимаем только из своего списка
+      if (!findModel(model)) return sendJson(res, 400, { error: `Неизвестная модель: ${model}` });
 
         const message = saveMessage('user', text);
 
@@ -104,8 +134,8 @@ const server = http.createServer((req, res) => {
         .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text }));
 
       try {
-        const { answer, trace } = await runAgent(history, broadcast);
-        const reply = saveMessage('assistant', answer, trace);
+        const { answer, trace } = await runAgent(history, broadcast, { model });
+        const reply = saveMessage('assistant', answer, { trace, model });
         sendJson(res, 201, { message, reply });
       } catch (err) {
         console.error('Ошибка агента:', err.message);
@@ -116,7 +146,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  
+
   sendJson(res, 404, { error: 'Not found' });
 });
 

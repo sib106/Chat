@@ -80,9 +80,8 @@ function broadcast(event) {
 Переписка лежит в `messages.json` рядом с сервером — обычный массив объектов. При каждом сохранении файл читается целиком, дополняется и записывается заново:
 
 ```js
-function saveMessage(role, text, trace) {
-  const message = { id: Date.now(), role, text, createdAt: new Date().toISOString() };
-  if (trace) message.trace = trace;
+function saveMessage(role, text, extra = {}) {
+  const message = { id: Date.now(), role, text, createdAt: new Date().toISOString(), ...extra };
 
   const messages = readMessages();
   messages.push(message);
@@ -91,7 +90,7 @@ function saveMessage(role, text, trace) {
 }
 ```
 
-Ответы агента хранятся вместе с трассировкой, поэтому «Показать процесс» работает и после перезагрузки страницы. Платой за это является размер файла: одна трассировка с результатами поиска весит больше самого ответа.
+В `extra` кладутся трассировка и модель, которой отвечали. Ответы агента хранятся вместе с трассировкой, поэтому «Показать процесс» работает и после перезагрузки страницы. Платой за это является размер файла: одна трассировка с результатами поиска весит больше самого ответа.
 
 Файл внесён в `.gitignore` — переписка не должна попадать в репозиторий.
 

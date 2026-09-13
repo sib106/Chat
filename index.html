@@ -9,7 +9,12 @@
 <body>
 
   <nav class="navbar">
-    <div class="navbar__logo">💬 Полигон ИИ-агентов</div>
+    <div class="navbar__logo">Полигон ИИ-агентов</div>
+
+    <div class="navbar__model">
+      <label for="modelSelect">Модель</label>
+      <select id="modelSelect" class="navbar__select"></select>
+    </div>
     <ul class="navbar__links">
       <li><a href="#" class="active">Главная</a></li>
       <li><a href="#">Контакты</a></li>
@@ -21,7 +26,7 @@
     <section class="chat">
       <div class="chat__window" id="chatWindow">
         <div class="message message--in">
-          Привет! Напиши что-нибудь 👋
+          Привет! Напиши что-нибудь
           <span class="message__time">--:--</span>
         </div>
       </div>

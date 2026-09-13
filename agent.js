@@ -2,7 +2,29 @@ const fs = require('fs');
 const path = require('path');
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434/api/chat';
-const MODEL = 'qwen3:8b';
+// Модели полигона. Выбор приходит из интерфейса, здесь же лежат их особенности
+const MODELS = [
+  { id: 'qwen3:1.7b', title: 'Qwen3 1.7B', note: 'самая быстрая, проверка нижней границы', options: { num_ctx: 4096 } },
+  { id: 'qwen3:4b', title: 'Qwen3 4B', note: 'быстрая повседневная' },
+  { id: 'qwen3:8b', title: 'Qwen3 8B', note: 'точка отсчёта', default: true },
+  { id: 'qwen3:14b', title: 'Qwen3 14B', note: 'умнее, но медленнее', options: { num_ctx: 6144 } },
+  { id: 'qwen3:30b-a3b', title: 'Qwen3 30B A3B', note: 'частично в оперативной памяти, медленная', options: { num_ctx: 4096 } },
+];
+
+const DEFAULT_MODEL = (MODELS.find((m) => m.default) || MODELS[0]).id;
+
+// Общие параметры генерации, профиль модели может их переопределить
+const BASE_OPTIONS = {
+  temperature: 0.2, // меньше фантазии
+  top_p: 0.9,
+  repeat_penalty: 1.1,
+  num_ctx: 8192, // размер контекста
+  num_predict: 512, // потолок длины ответа
+};
+
+function findModel(id) {
+  return MODELS.find((m) => m.id === id);
+}
 const MAX_STEPS = 6; // предохранитель от бесконечного цикла
 const KNOWLEDGE_FILE = path.join(__dirname, 'knowledge.md');
 
@@ -334,32 +356,36 @@ function stripThink(text) {
 }
 
 // 4. Один запрос к модели
-async function callOllama(messages) {
+async function callOllama(messages, modelId) {
+  const profile = findModel(modelId) || findModel(DEFAULT_MODEL);
+
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model: profile.id,
       stream: false,
       think: false,
       messages,
       tools: TOOLS,
-      options: {
-        temperature: 0.2, // меньше фантазии
-        top_p: 0.9,
-        repeat_penalty: 1.1,
-        num_ctx: 8192, // размер контекста
-        num_predict: 512, // потолок длины ответа
-      },
+      options: { ...BASE_OPTIONS, ...profile.options },
     }),
   });
-  if (!res.ok) throw new Error(`Ollama вернула ${res.status}: ${await res.text()}`);
+
+  if (!res.ok) {
+    const details = await res.text();
+    // Частый случай: модель просто не скачана — подскажем команду
+    if (res.status === 404) throw new Error(`Модель ${profile.id} не скачана. Выполните: ollama pull ${profile.id}`);
+    throw new Error(`Ollama вернула ${res.status}: ${details}`);
+  }
+
   return (await res.json()).message;
 }
 
 // 5. Цикл агента: подумал -> вызвал инструменты -> ответил -> прошёл проверку
-async function runAgent(history, onEvent = () => {}) {
-  const trace = { startedAt: new Date().toISOString(), steps: [] };
+async function runAgent(history, onEvent = () => {}, options = {}) {
+  const model = findModel(options.model) ? options.model : DEFAULT_MODEL;
+  const trace = { startedAt: new Date().toISOString(), model, steps: [] };
   const emit = (event) => onEvent({ ...event, at: Date.now() });      // просто рассказать
   const record = (step) => { trace.steps.push(step); emit(step); };   // записать в трассировку и рассказать
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];
@@ -369,13 +395,13 @@ async function runAgent(history, onEvent = () => {}) {
   const startedAt = Date.now();
   let retriesLeft = 2;
 
-  emit({ type: 'start', question });
+  emit({ type: 'start', question, model });
 
   for (let step = 1; step <= MAX_STEPS; step++) {
     emit({ type: 'thinking', step });
 
     const t0 = Date.now();
-    const reply = await callOllama(messages);
+    const reply = await callOllama(messages, model);
     const toolCalls = reply.tool_calls || [];
 
     record({
@@ -454,4 +480,4 @@ async function runAgent(history, onEvent = () => {}) {
   return { answer: trace.answer, trace };
 }
 
-module.exports = { runAgent };
+module.exports = { runAgent, MODELS, DEFAULT_MODEL, findModel };
