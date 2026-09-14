@@ -8,7 +8,7 @@ const MODELS = [
   { id: 'qwen3:4b', title: 'Qwen3 4B', note: 'быстрая повседневная' },
   { id: 'qwen3:8b', title: 'Qwen3 8B', note: 'точка отсчёта', default: true },
   { id: 'qwen3:14b', title: 'Qwen3 14B', note: 'умнее, но медленнее', options: { num_ctx: 6144 } },
-  { id: 'qwen3:30b-a3b', title: 'Qwen3 30B A3B', note: 'частично в оперативной памяти, медленная', options: { num_ctx: 4096 } },
+  { id: 'qwen3:30b-a3b', title: 'Qwen3 30B A3B', note: 'частично в оперативной памяти, медленная', think: true, options: { num_ctx: 4096, num_predict: 1536 } },
 ];
 
 const DEFAULT_MODEL = (MODELS.find((m) => m.default) || MODELS[0]).id;
@@ -32,7 +32,7 @@ const KNOWLEDGE_FILE = path.join(__dirname, 'knowledge.md');
 const WIKI_API = process.env.WIKI_API || 'https://LANG.wikipedia.org/w/api.php'; // LANG заменяется на ru или en
 const USER_AGENT = 'AgentPolygon/1.0 (educational project)'; // только латиница: заголовки HTTP не принимают кириллицу
 const WEB_TIMEOUT_MS = 15000; // сколько ждать ответа сайта
-const WEB_ATTEMPTS = 2; // первая попытка иногда отваливается по таймауту
+const WEB_ATTEMPTS = 3; // Вики периодически не отвечает, поэтому пробуем несколько раз
 const PAGE_CHARS = 3000; // сколько символов страницы отдавать модели
 const MAX_PAGE_BYTES = 3_000_000; // страницы тяжелее не качаем
 
@@ -267,7 +267,6 @@ const TOOL_IMPL = {
   },
 };
 
-// 3. Проверки ответа: если правило нарушено, агент получает ещё одну попытку
 const WEB_TOOLS = ['search_wikipedia', 'open_page'];
 
 // Работа со ссылками: что агент реально видел, а что придумал
@@ -302,6 +301,9 @@ function saysUnknown(answer) {
   return /не знаю|не наш[её]л|не удалось|нет данных|не смог/i.test(String(answer));
 }
 
+const ASKS_FACT = /(^|[\s,!?.:;«»"'()—–-])(кто |что такое|что это|когда |где |почему|зачем|расскажи|назови)/i;
+const META_ANSWER = /^(ссылк[аи] (удалена|убрана)|вот исправленный|исправленный ответ|я исправил|ответ исправлен|хорошо,? пользовател|пользователь (просит|спрашивает)|нужно исправить)/i;
+
 // 3. Проверки ответа: если правило нарушено, агент получает ещё одну попытку
 const CHECKS = [
   {
@@ -335,9 +337,15 @@ const CHECKS = [
   },
   {
     name: 'ответ по памяти',
-    needed: (ctx) => /^(кто |что такое|что это|когда |где |почему|зачем|расскажи|назови)/i.test(ctx.question.trim()) && ctx.usedTools.length === 0,
+    needed: (ctx) => ASKS_FACT.test(ctx.question) && ctx.usedTools.length === 0,
     satisfied: (ctx) => saysUnknown(ctx.answer),
     hint: 'Ты ответил по памяти, не заглянув ни в один источник. Вызови search_wikipedia и ответь по её данным, приложив ссылку.',
+  },
+  {
+    name: 'мета-ответ вместо ответа',
+    needed: () => true,
+    satisfied: (ctx) => !META_ANSWER.test(ctx.answer.trim()),
+    hint: 'Ты написал комментарий о правке вместо самого ответа. Выведи готовый ответ на вопрос пользователя целиком.',
   },
   {
     name: 'источники ничего не дали',
@@ -365,7 +373,7 @@ async function callOllama(messages, modelId) {
     body: JSON.stringify({
       model: profile.id,
       stream: false,
-      think: false,
+      think: profile.think === true, // 30b-a3b иначе высыпает рассуждения прямо в ответ
       messages,
       tools: TOOLS,
       options: { ...BASE_OPTIONS, ...profile.options },
@@ -409,6 +417,7 @@ async function runAgent(history, onEvent = () => {}, options = {}) {
       type: 'llm',
       ms: Date.now() - t0,
       content: stripThink(reply.content),
+      thinking: reply.thinking ? String(reply.thinking).slice(0, 400) : undefined,
       toolCalls: toolCalls.map((c) => c.function.name),
     });
     console.log(`[agent] шаг ${step}: модель думала ${Date.now() - t0} мс, вызовов инструментов: ${toolCalls.length}`);
@@ -432,7 +441,11 @@ async function runAgent(history, onEvent = () => {}, options = {}) {
         retriesLeft--;
         emit({ type: 'retry', step, reasons: failed.map((c) => c.name) });
         messages.push({ role: 'assistant', content: answer });
-        messages.push({ role: 'user', content: failed.map((c) => c.hint).join(' ') });
+        messages.push({
+          role: 'user',
+          content: failed.map((c) => c.hint).join(' ') +
+            ' Выведи полный исправленный ответ целиком, как будто отвечаешь заново, без комментариев о том, что ты исправил.',
+        });
         continue;
       }
 
